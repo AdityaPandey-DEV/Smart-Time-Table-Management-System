@@ -48,7 +48,8 @@ def test_openai_setup():
     
     # Test API connection
     try:
-        client = openai.OpenAI(api_key=api_key)
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
         
         # Make a simple test request
         response = client.chat.completions.create(

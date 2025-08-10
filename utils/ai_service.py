@@ -15,6 +15,12 @@ try:
 except ImportError:
     OPENAI_AVAILABLE = False
 
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -23,46 +29,91 @@ class AIService:
     
     def __init__(self):
         self.client = None
+        self.hf_token = None
         self.mock_mode = True
+        self.ai_provider = 'offline'
         
+        # Import offline AI
+        try:
+            from utils.offline_ai import get_ai_response
+            self.offline_ai_available = True
+            logger.info("Offline AI initialized successfully")
+        except ImportError as e:
+            self.offline_ai_available = False
+            logger.warning(f"Offline AI not available: {e}")
+        
+        # Try OpenAI first
         if (OPENAI_AVAILABLE and 
             hasattr(settings, 'OPENAI_API_KEY') and 
             settings.OPENAI_API_KEY and 
-            settings.OPENAI_API_KEY != ''):
+            settings.OPENAI_API_KEY != '' and
+            settings.OPENAI_API_KEY != 'sk-your-openai-api-key-here'):
             try:
                 self.client = OpenAI(
                     api_key=settings.OPENAI_API_KEY,
                     timeout=30.0,
                     max_retries=2
                 )
-                self.mock_mode = settings.DEBUG
+                self.mock_mode = False
+                self.ai_provider = 'openai'
                 logger.info("OpenAI client initialized successfully")
             except Exception as e:
                 logger.warning(f"Failed to initialize OpenAI client: {str(e)}")
+                self.client = None
+        
+        # Try Hugging Face as fallback
+        if (not self.client and REQUESTS_AVAILABLE and
+            hasattr(settings, 'HUGGINGFACE_API_KEY') and 
+            settings.HUGGINGFACE_API_KEY and 
+            settings.HUGGINGFACE_API_KEY != '' and
+            settings.HUGGINGFACE_API_KEY.startswith('hf_')):
+            try:
+                self.hf_token = settings.HUGGINGFACE_API_KEY
+                # Test the token
+                headers = {"Authorization": f"Bearer {self.hf_token}"}
+                test_response = requests.get("https://huggingface.co/api/whoami", headers=headers, timeout=10)
+                if test_response.status_code == 200:
+                    self.mock_mode = False
+                    self.ai_provider = 'huggingface'
+                    logger.info("Hugging Face API initialized successfully")
+                else:
+                    logger.warning("Hugging Face token validation failed")
+                    self.hf_token = None
+            except Exception as e:
+                logger.warning(f"Failed to initialize Hugging Face API: {str(e)}")
+                self.hf_token = None
+        
+        # Final mode determination
+        if not self.client and not self.hf_token:
+            if self.offline_ai_available:
+                self.ai_provider = 'offline'
+                self.mock_mode = False
+                logger.info("AI Service using intelligent offline mode")
+            else:
+                self.ai_provider = 'mock'
                 self.mock_mode = True
+                logger.info("AI Service running in basic mock mode")
     
     def chat_with_ai(self, message: str, context: Dict = None) -> str:
         """Chat with AI for student queries."""
         try:
-            if self.mock_mode:
+            if self.ai_provider == 'openai' and not self.mock_mode:
+                return self._chat_with_openai(message, context)
+            elif self.ai_provider == 'huggingface' and not self.mock_mode:
+                return self._chat_with_huggingface(message, context)
+            elif self.ai_provider == 'offline' and self.offline_ai_available:
+                return self._chat_with_offline_ai(message, context)
+            else:
                 return self._mock_chat_response(message, context)
             
-            system_prompt = self._build_system_prompt(context)
-            
-            response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": message}
-                ],
-                max_tokens=500,
-                temperature=0.7
-            )
-            
-            return response.choices[0].message.content.strip()
-            
         except Exception as e:
-            logger.error(f"OpenAI chat error: {str(e)}")
+            logger.error(f"AI chat error: {str(e)}")
+            # Try offline AI as fallback
+            if self.offline_ai_available:
+                try:
+                    return self._chat_with_offline_ai(message, context)
+                except:
+                    pass
             return self._mock_chat_response(message, context)
     
     def chat_response(self, message: str, context: Dict = None) -> str:
@@ -314,6 +365,130 @@ class AIService:
     def _parse_analysis_response(self, content: str) -> Dict:
         """Parse AI analysis response to structured format."""
         return self._mock_performance_analysis({})
+    
+    # AI Provider specific methods
+    def _chat_with_openai(self, message: str, context: Dict = None) -> str:
+        """Chat using OpenAI API."""
+        system_prompt = self._build_system_prompt(context)
+        
+        response = self.client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": message}
+            ],
+            max_tokens=500,
+            temperature=0.7
+        )
+        
+        return response.choices[0].message.content.strip()
+    
+    def _chat_with_huggingface(self, message: str, context: Dict = None) -> str:
+        """Chat using Hugging Face API."""
+        try:
+            headers = {"Authorization": f"Bearer {self.hf_token}"}
+            
+            # Build context-aware prompt
+            system_prompt = self._build_system_prompt(context)
+            full_prompt = f"{system_prompt}\n\nUser: {message}\nAssistant:"
+            
+            payload = {
+                "inputs": full_prompt,
+                "parameters": {
+                    "max_new_tokens": 200,
+                    "temperature": 0.7,
+                    "return_full_text": False
+                }
+            }
+            
+            # Try multiple models for better reliability
+            models_to_try = [
+                "microsoft/DialoGPT-large",
+                "microsoft/DialoGPT-medium", 
+                "facebook/blenderbot-400M-distill"
+            ]
+            
+            for model in models_to_try:
+                try:
+                    response = requests.post(
+                        f"https://api-inference.huggingface.co/models/{model}",
+                        headers=headers,
+                        json=payload,
+                        timeout=30
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        if isinstance(result, list) and len(result) > 0:
+                            generated_text = result[0].get('generated_text', '').strip()
+                            if generated_text:
+                                # Clean up the response
+                                return self._clean_hf_response(generated_text, message)
+                    
+                    elif response.status_code == 503:
+                        # Model is loading, try next one
+                        continue
+                        
+                except Exception as e:
+                    logger.warning(f"Error with HF model {model}: {e}")
+                    continue
+            
+            # If all models fail, return intelligent fallback
+            return self._generate_smart_response(message, context)
+            
+        except Exception as e:
+            logger.error(f"Hugging Face chat error: {e}")
+            return self._generate_smart_response(message, context)
+    
+    def _clean_hf_response(self, generated_text: str, original_message: str) -> str:
+        """Clean and format Hugging Face response."""
+        # Remove any repetition of the original message
+        cleaned = generated_text.replace(original_message, "").strip()
+        
+        # Remove common prefixes/suffixes
+        prefixes_to_remove = ["Assistant:", "Bot:", "AI:", "Response:"]
+        for prefix in prefixes_to_remove:
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix):].strip()
+        
+        # Ensure response is helpful and contextual
+        if len(cleaned) < 10 or not cleaned:
+            return self._generate_smart_response(original_message)
+        
+        return cleaned
+    
+    def _chat_with_offline_ai(self, message: str, context: Dict = None) -> str:
+        """Chat using offline AI."""
+        try:
+            from utils.offline_ai import get_ai_response
+            return get_ai_response(message, context)
+        except Exception as e:
+            logger.error(f"Offline AI error: {e}")
+            return self._generate_smart_response(message, context)
+    
+    def _generate_smart_response(self, message: str, context: Dict = None) -> str:
+        """Generate contextually appropriate response when AI fails."""
+        message_lower = message.lower()
+        
+        # Academic scheduling responses
+        if any(word in message_lower for word in ['schedule', 'timetable', 'class', 'when']):
+            return "I can help you with your schedule! Your classes are organized to optimize your learning. Check your dashboard for today's schedule and any updates."
+        
+        # Study help responses  
+        elif any(word in message_lower for word in ['study', 'exam', 'test', 'homework', 'assignment']):
+            return "For effective studying, I recommend: 1) Review your notes daily, 2) Practice problems regularly, 3) Use active recall techniques. Would you like specific study tips for any subject?"
+        
+        # Course/subject responses
+        elif any(word in message_lower for word in ['subject', 'course', 'math', 'physics', 'chemistry', 'biology', 'english']):
+            return "I can provide guidance on your courses! Each subject in your timetable is designed to build your knowledge progressively. Focus on understanding concepts rather than just memorizing."
+        
+        # Grade/performance responses
+        elif any(word in message_lower for word in ['grade', 'score', 'performance', 'result']):
+            return "Your academic performance is important! I can help you track your progress and suggest improvements. Regular attendance and consistent study habits are key to success."
+        
+        # General academic help
+        else:
+            return f"Thanks for your question! I'm here to assist with your academic journey. I can help with schedules, study tips, course guidance, and academic planning. How can I support your learning today?"
 
 # Create a singleton instance
 ai_service = AIService()
