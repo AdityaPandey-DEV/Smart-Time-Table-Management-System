@@ -12,7 +12,12 @@ pip install -r requirements.txt
 python manage.py collectstatic --no-input
 
 # Run migrations
-python manage.py migrate
+echo "Running database migrations..."
+python manage.py makemigrations --noinput
+python manage.py migrate --noinput
 
-# Create default superuser
+# Create default superuser if needed
+echo "Creating default users..."
 python manage.py create_default_superuser
+
+echo "Build completed successfully!"
