@@ -30,8 +30,13 @@ class AIService:
             settings.OPENAI_API_KEY and 
             settings.OPENAI_API_KEY != ''):
             try:
-                self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+                self.client = OpenAI(
+                    api_key=settings.OPENAI_API_KEY,
+                    timeout=30.0,
+                    max_retries=2
+                )
                 self.mock_mode = settings.DEBUG
+                logger.info("OpenAI client initialized successfully")
             except Exception as e:
                 logger.warning(f"Failed to initialize OpenAI client: {str(e)}")
                 self.mock_mode = True
@@ -59,6 +64,10 @@ class AIService:
         except Exception as e:
             logger.error(f"OpenAI chat error: {str(e)}")
             return self._mock_chat_response(message, context)
+    
+    def chat_response(self, message: str, context: Dict = None) -> str:
+        """Alias for chat_with_ai method for compatibility."""
+        return self.chat_with_ai(message, context)
     
     def generate_study_recommendation(self, student_data: Dict) -> Dict:
         """Generate personalized study recommendations."""

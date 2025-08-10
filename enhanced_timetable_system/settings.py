@@ -29,16 +29,16 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-this-in-produc
 DEBUG = config('DEBUG', default=True, cast=bool)
 
 # ALLOWED_HOSTS configuration for production
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,*.onrender.com').split(',')
+ALLOWED_HOSTS = [host.strip() for host in config('ALLOWED_HOSTS', default='localhost,127.0.0.1,*.onrender.com').split(',')]
 
-# Add common Render domain patterns
-if not DEBUG:
-    ALLOWED_HOSTS.extend([
-        'smart-time-table-management-system.onrender.com',
-        '.onrender.com',
-        'enhanced-timetable-system.onrender.com',
-        'timetable-system.onrender.com'
-    ])
+# Add specific Render domain and common patterns
+ALLOWED_HOSTS.extend([
+    'smart-time-table-management-system-1.onrender.com',
+    '.onrender.com',
+    'smart-time-table-management-system.onrender.com', 
+    'enhanced-timetable-system.onrender.com',
+    'timetable-system.onrender.com'
+])
 
 
 # Application definition
