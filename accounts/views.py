@@ -84,12 +84,12 @@ def handle_student_registration_step1(request):
         if password != confirm_password:
             errors.append('Passwords do not match.')
         
-        # Check uniqueness
+        # Check uniqueness - prevent duplicate registration
         if StudentProfile.objects.filter(roll_number=roll_number).exists():
             errors.append('Roll number already exists.')
         
         if User.objects.filter(email=email).exists():
-            errors.append('Email already registered.')
+            errors.append('Email already registered. If you already have an account, please login instead.')
         
         if User.objects.filter(username=roll_number).exists():
             errors.append('This roll number is already taken.')

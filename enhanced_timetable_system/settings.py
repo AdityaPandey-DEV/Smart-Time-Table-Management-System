@@ -167,6 +167,11 @@ USE_I18N = True
 
 USE_TZ = True
 
+# Session Configuration
+# Extended session timeout to prevent registration session expiry
+SESSION_COOKIE_AGE = 1800  # 30 minutes
+SESSION_SAVE_EVERY_REQUEST = True  # Refresh session on each request
+
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/

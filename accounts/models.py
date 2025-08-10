@@ -236,12 +236,12 @@ class EmailOTP(models.Model):
         # Generate 6-digit OTP
         otp_code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
         
-        # Create new OTP
+        # Create new OTP with explicit 15-minute expiration (buffer for timezone issues)
         otp = cls.objects.create(
             email=email,
             otp_code=otp_code,
             purpose=purpose,
-            expires_at=timezone.now() + timedelta(minutes=10)
+            expires_at=timezone.now() + timedelta(minutes=15)
         )
         
         return otp_code
