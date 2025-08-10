@@ -15,4 +15,5 @@ requests==2.32.3
 gunicorn==22.0.0
 dj-database-url==2.1.0
 psycopg[binary]
+twilio==9.7.0
 whitenoise==6.7.0
