@@ -10,7 +10,7 @@ from django.utils import timezone
 import json
 import re
 
-from .models import User, StudentProfile, AdminProfile, TeacherProfile, OTP
+from .models import User, StudentProfile, AdminProfile, TeacherProfile, OTP, EmailOTP
 from utils.notifications import send_otp_notification
 
 def landing_page(request):
@@ -43,7 +43,7 @@ def student_register(request):
     return render(request, 'accounts/student_register.html')
 
 def handle_student_registration_step1(request):
-    """Handle step 1 of student registration - collect info and send OTP."""
+    """Handle step 1 of student registration - collect info and send Email OTP (FREE)."""
     try:
         # Get form data
         first_name = request.POST.get('first_name', '').strip()
@@ -52,15 +52,16 @@ def handle_student_registration_step1(request):
         course = request.POST.get('course', '').strip()
         year = int(request.POST.get('year', 0))
         section = request.POST.get('section', '').strip().upper()
-        phone_number = request.POST.get('phone_number', '').strip()
+        email = request.POST.get('email', '').strip().lower()
+        phone_number = request.POST.get('phone_number', '').strip()  # Optional now
         password = request.POST.get('password', '')
         confirm_password = request.POST.get('confirm_password', '')
         
         # Validation
         errors = []
         
-        if not all([first_name, last_name, roll_number, course, year, section, phone_number, password]):
-            errors.append('All fields are required.')
+        if not all([first_name, last_name, roll_number, course, year, section, email, phone_number, password]):
+            errors.append('All required fields must be filled.')
         
         if year not in [1, 2, 3, 4]:
             errors.append('Invalid year. Must be 1-4.')
@@ -70,6 +71,9 @@ def handle_student_registration_step1(request):
         
         if not re.match(r'^[A-Z0-9]+$', roll_number):
             errors.append('Roll number should contain only uppercase letters and numbers.')
+        
+        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+            errors.append('Invalid email format.')
         
         if not re.match(r'^\+?[\d\s\-\(\)]{10,15}$', phone_number):
             errors.append('Invalid phone number format.')
@@ -84,8 +88,8 @@ def handle_student_registration_step1(request):
         if StudentProfile.objects.filter(roll_number=roll_number).exists():
             errors.append('Roll number already exists.')
         
-        if User.objects.filter(phone_number=phone_number).exists():
-            errors.append('Phone number already registered.')
+        if User.objects.filter(email=email).exists():
+            errors.append('Email already registered.')
         
         if User.objects.filter(username=roll_number).exists():
             errors.append('This roll number is already taken.')
@@ -95,10 +99,10 @@ def handle_student_registration_step1(request):
                 messages.error(request, error)
             return render(request, 'accounts/student_register.html')
         
-        # Generate and send OTP
-        otp_code = OTP.generate_otp(phone_number, 'registration')
+        # Generate and send Email OTP (FREE!)
+        otp_code = EmailOTP.generate_otp(email, 'registration')
         
-        if send_otp_notification(phone_number, otp_code, 'registration'):
+        if send_otp_notification(email, otp_code, 'registration', method='email'):
             # Store registration data in session
             request.session['reg_data'] = {
                 'first_name': first_name,
@@ -107,18 +111,19 @@ def handle_student_registration_step1(request):
                 'course': course,
                 'year': year,
                 'section': section,
-                'phone_number': phone_number,
+                'email': email,
+                'phone_number': phone_number or '',  # Optional
                 'password': password,
                 'user_type': 'student'
             }
             
-            messages.info(request, f'OTP sent to {phone_number}. Please enter the 6-digit code to complete registration.')
+            messages.success(request, f'📧 OTP sent to {email}. Please check your email and enter the 6-digit code to complete registration.')
             return render(request, 'accounts/student_register.html', {
                 'step': 2,
-                'phone_number': phone_number
+                'email': email
             })
         else:
-            messages.error(request, 'Failed to send OTP. Please try again.')
+            messages.error(request, 'Failed to send OTP email. Please check your email address and try again.')
             return render(request, 'accounts/student_register.html')
             
     except Exception as e:
@@ -142,15 +147,16 @@ def handle_student_registration_step2(request):
                 'phone_number': reg_data['phone_number']
             })
         
-        # Verify OTP
-        if OTP.verify_otp(reg_data['phone_number'], otp_code, 'registration'):
+        # Verify Email OTP
+        if EmailOTP.verify_otp(reg_data['email'], otp_code, 'registration'):
             # Create user and profile
             with transaction.atomic():
                 user = User.objects.create_user(
                     username=reg_data['roll_number'],
+                    email=reg_data['email'],
                     first_name=reg_data['first_name'],
                     last_name=reg_data['last_name'],
-                    phone_number=reg_data['phone_number'],
+                    phone_number=reg_data.get('phone_number') or '',
                     user_type='student'
                 )
                 user.set_password(reg_data['password'])
@@ -167,13 +173,13 @@ def handle_student_registration_step2(request):
             # Clear session data
             del request.session['reg_data']
             
-            messages.success(request, 'Registration successful! Your account has been verified. You can now log in.')
+            messages.success(request, '✅ Registration successful! Your email has been verified. You can now log in.')
             return redirect('accounts:login')
         else:
             messages.error(request, 'Invalid or expired OTP. Please try again.')
             return render(request, 'accounts/student_register.html', {
                 'step': 2,
-                'phone_number': reg_data['phone_number']
+                'email': reg_data['email']
             })
             
     except Exception as e:
@@ -638,27 +644,27 @@ def resend_registration_otp(request):
     
     try:
         reg_data = request.session['reg_data']
-        phone_number = reg_data.get('phone_number')
+        email = reg_data.get('email')
         
-        if not phone_number:
+        if not email:
             return JsonResponse({
                 'success': False,
-                'message': 'Phone number not found in session.'
+                'message': 'Email address not found in session.'
             })
         
-        # Generate new OTP
-        otp_code = OTP.generate_otp(phone_number, 'registration')
+        # Generate new Email OTP
+        otp_code = EmailOTP.generate_otp(email, 'registration')
         
-        # Send OTP
-        if send_otp_notification(phone_number, otp_code, 'registration'):
+        # Send Email OTP
+        if send_otp_notification(email, otp_code, 'registration', method='email'):
             return JsonResponse({
                 'success': True,
-                'message': f'New OTP sent to {phone_number}'
+                'message': f'New OTP sent to {email}'
             })
         else:
             return JsonResponse({
                 'success': False,
-                'message': 'Failed to send OTP. Please try again.'
+                'message': 'Failed to send OTP email. Please try again.'
             })
             
     except Exception as e:

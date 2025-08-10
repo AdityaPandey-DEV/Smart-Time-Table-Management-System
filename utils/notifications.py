@@ -12,28 +12,31 @@ import os
 # Configure logging
 logger = logging.getLogger(__name__)
 
-def send_otp_notification(phone_number, otp_code, purpose='password_reset'):
+def send_otp_notification(identifier, otp_code, purpose='registration', method='email'):
     """
-    Send OTP notification via available channels.
-    Returns True if any channel succeeds.
+    Send OTP notification via email (FREE) or SMS.
+    identifier: email address or phone number
+    method: 'email' (default/free) or 'sms'
+    Returns True if delivery succeeds.
     """
     success = False
     
-    # Try SMS first (if Twilio is configured)
-    if hasattr(settings, 'TWILIO_ACCOUNT_SID') and settings.TWILIO_ACCOUNT_SID:
-        success = send_otp_sms(phone_number, otp_code, purpose)
+    if method == 'email':
+        # Use Email OTP (completely free)
+        success = send_otp_email(identifier, otp_code, purpose)
+    elif method == 'sms':
+        # Use SMS OTP (requires Twilio setup)
+        if hasattr(settings, 'TWILIO_ACCOUNT_SID') and settings.TWILIO_ACCOUNT_SID:
+            success = send_otp_sms(identifier, otp_code, purpose)
+        else:
+            logger.warning("SMS requested but Twilio not configured")
     
-    # Try email as fallback (if configured)
-    if not success and hasattr(settings, 'EMAIL_HOST_USER') and settings.EMAIL_HOST_USER:
-        # For demo purposes, we'll use email as backup
-        # In real implementation, you'd need email address
-        logger.info(f"SMS failed or not configured. Email fallback would be implemented here.")
-    
-    # For development: always return True and log the OTP
+    # For development: always show OTP in console
     if settings.DEBUG:
-        logger.info(f"OTP for {phone_number}: {otp_code} (Purpose: {purpose})")
+        logger.info(f"OTP for {identifier}: {otp_code} (Purpose: {purpose}, Method: {method})")
         print(f"\n=== OTP NOTIFICATION ===")
-        print(f"Phone: {phone_number}")
+        print(f"Method: {method.upper()}")
+        print(f"To: {identifier}")
         print(f"OTP Code: {otp_code}")
         print(f"Purpose: {purpose}")
         print(f"======================\n")

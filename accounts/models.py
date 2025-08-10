@@ -15,8 +15,8 @@ class User(AbstractUser):
     ]
     
     user_type = models.CharField(max_length=10, choices=USER_TYPE_CHOICES)
-    phone_number = models.CharField(max_length=15, blank=True, null=True, unique=True, help_text="Phone number for OTP verification (optional)")
-    is_verified = models.BooleanField(default=True)  # For future phone verification
+    phone_number = models.CharField(max_length=15, blank=True, null=True, help_text="Phone number for SMS notifications")
+    is_verified = models.BooleanField(default=True)  # For future verification
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -198,3 +198,74 @@ class OTP(models.Model):
     
     def __str__(self):
         return f"OTP for {self.phone_number} - {self.purpose}"
+
+class EmailOTP(models.Model):
+    """Email-based OTP model for verification (FREE alternative to SMS)."""
+    PURPOSE_CHOICES = [
+        ('password_reset', 'Password Reset'),
+        ('email_verification', 'Email Verification'),
+        ('login_verification', 'Login Verification'),
+        ('registration', 'Registration Verification'),
+    ]
+    
+    email = models.EmailField()
+    otp_code = models.CharField(max_length=6)
+    purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES, default='registration')
+    is_used = models.BooleanField(default=False)
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def save(self, *args, **kwargs):
+        if not self.expires_at:
+            self.expires_at = timezone.now() + timedelta(minutes=10)
+        super().save(*args, **kwargs)
+    
+    @classmethod
+    def generate_otp(cls, email, purpose='registration'):
+        """Generate a new OTP for the given email address."""
+        # Invalidate existing OTPs for this email and purpose
+        cls.objects.filter(
+            email=email,
+            purpose=purpose,
+            is_used=False
+        ).update(is_used=True)
+        
+        # Generate 6-digit OTP
+        otp_code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+        
+        # Create new OTP
+        otp = cls.objects.create(
+            email=email,
+            otp_code=otp_code,
+            purpose=purpose,
+            expires_at=timezone.now() + timedelta(minutes=10)
+        )
+        
+        return otp_code
+    
+    @classmethod
+    def verify_otp(cls, email, otp_code, purpose='registration'):
+        """Verify OTP for the given email address."""
+        try:
+            otp = cls.objects.get(
+                email=email,
+                otp_code=otp_code,
+                purpose=purpose,
+                is_used=False,
+                expires_at__gt=timezone.now()
+            )
+            otp.is_used = True
+            otp.save()
+            return True
+        except cls.DoesNotExist:
+            return False
+    
+    def is_expired(self):
+        """Check if OTP is expired."""
+        return timezone.now() > self.expires_at
+    
+    def __str__(self):
+        return f"Email OTP for {self.email} - {self.purpose}"
