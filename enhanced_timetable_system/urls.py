@@ -22,6 +22,7 @@ from django.conf.urls.static import static
 urlpatterns = [
     path('django-admin/', admin.site.urls),  # Renamed to avoid conflict
     path('', include('accounts.urls')),
+    path('api/', include('accounts.api_urls')),  # API endpoints for AJAX calls
     path('timetable/', include('timetable.urls')),
     path('ai/', include('ai_features.urls')),
 ]
