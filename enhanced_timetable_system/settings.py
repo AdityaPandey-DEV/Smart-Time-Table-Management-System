@@ -100,9 +100,16 @@ WSGI_APPLICATION = 'enhanced_timetable_system.wsgi.application'
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
 # Database Configuration
-# Use MySQL from AlwaysData in production, SQLite in development
-if config('USE_MYSQL', default=False, cast=bool) or 'DB_PASSWORD' in os.environ:
-    # MySQL Configuration for AlwaysData
+# Priority: DATABASE_URL (PostgreSQL) > MySQL > SQLite
+if 'DATABASE_URL' in os.environ:
+    # PostgreSQL Configuration (Render/Heroku style)
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=config('DATABASE_URL')
+        )
+    }
+elif config('USE_MYSQL', default=False, cast=bool) or 'DB_PASSWORD' in os.environ:
+    # MySQL Configuration for AlwaysData (if external access is enabled)
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.mysql',
@@ -114,6 +121,9 @@ if config('USE_MYSQL', default=False, cast=bool) or 'DB_PASSWORD' in os.environ:
             'OPTIONS': {
                 'charset': 'utf8mb4',
                 'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+                'connect_timeout': 20,
+                'read_timeout': 20,
+                'write_timeout': 20,
             },
         }
     }
