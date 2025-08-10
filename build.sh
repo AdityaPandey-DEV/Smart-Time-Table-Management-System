@@ -14,8 +14,25 @@ pip install -r requirements.txt
 echo "Collecting static files..."
 python manage.py collectstatic --no-input
 
-# Initialize database with comprehensive setup
-echo "Initializing database with all required data..."
-python manage.py initialize_database --force
+# Generate fresh PostgreSQL-compatible migrations
+echo "Creating fresh migrations for PostgreSQL..."
+python manage.py makemigrations accounts --noinput
+python manage.py makemigrations timetable --noinput
+python manage.py makemigrations ai_features --noinput
+
+# Apply migrations
+echo "Applying migrations to PostgreSQL database..."
+python manage.py migrate --noinput
+
+# Verify database tables exist
+echo "Verifying database tables..."
+python manage.py showmigrations
+
+# Create default admin and sample data
+echo "Creating default admin user..."
+python manage.py create_default_superuser
+
+echo "Populating sample data..."
+python manage.py populate_realistic_data
 
 echo "Build completed successfully!"
