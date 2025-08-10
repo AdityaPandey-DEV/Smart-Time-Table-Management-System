@@ -15,7 +15,10 @@ import json
 from accounts.models import User, StudentProfile
 from timetable.models import TimetableEntry, Subject, Enrollment, Attendance, Announcement
 from ai_features.models import AIChat, ChatMessage, StudyRecommendation, SmartNotification
-from utils.ai_service import ai_service
+try:
+    from utils.ai_service import ai_service
+except ImportError:
+    ai_service = None
 
 def student_required(view_func):
     """Decorator to ensure user is a student."""
@@ -82,16 +85,21 @@ def student_dashboard(request):
     ).order_by('-priority', '-created_at')[:5]
     
     # AI-powered timetable summary
-    if today_classes.exists():
-        ai_summary = ai_service.chat_response(
-            f"Summarize today's schedule for a {student.course} Year {student.year} student with {today_classes.count()} classes",
-            context={'student_info': {
-                'name': student.user.get_full_name(),
-                'course': student.course,
-                'year': student.year,
-                'section': student.section
-            }}
-        )
+    if today_classes.exists() and ai_service:
+        try:
+            ai_summary = ai_service.chat_response(
+                f"Summarize today's schedule for a {student.course} Year {student.year} student with {today_classes.count()} classes",
+                context={'student_info': {
+                    'name': student.user.get_full_name(),
+                    'course': student.course,
+                    'year': student.year,
+                    'section': student.section
+                }}
+            )
+        except Exception:
+            ai_summary = f"You have {today_classes.count()} classes scheduled for today. Stay focused and make the most of your learning!"
+    elif today_classes.exists():
+        ai_summary = f"You have {today_classes.count()} classes scheduled for today. Stay focused and make the most of your learning!"
     else:
         ai_summary = "No classes scheduled for today. Great time to catch up on assignments and review previous lessons!"
     

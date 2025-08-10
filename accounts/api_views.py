@@ -11,8 +11,10 @@ from django.views.decorators.csrf import csrf_exempt
 import json
 from django.db.models import Q
 
-# Import models (these would need to be defined in models.py)
-# from .models import Announcement, Subject, StudentRecommendation, StudentProfile
+# Import models
+from timetable.models import Announcement, Subject, TimetableEntry, Teacher, Course
+from ai_features.models import StudyRecommendation, SmartNotification
+from .models import StudentProfile, User
 
 
 @login_required
@@ -20,19 +22,20 @@ from django.db.models import Q
 def get_announcement_details(request, announcement_id):
     """Get announcement details for modal display"""
     try:
-        # Mock announcement data - replace with actual model query
+        announcement = get_object_or_404(Announcement, id=announcement_id)
+        
         announcement_data = {
-            'id': announcement_id,
-            'title': 'Sample Announcement',
-            'content': 'This is a sample announcement content that would be displayed in the modal.',
-            'is_urgent': False,
-            'target_audience': 'all',
-            'target_audience_display': 'All Students',
-            'target_course': '',
-            'target_year': None,
-            'target_section': '',
-            'created_at': '2024-01-15T10:30:00Z',
-            'posted_by_name': 'Admin User'
+            'id': announcement.id,
+            'title': announcement.title,
+            'content': announcement.content,
+            'is_urgent': announcement.is_urgent,
+            'target_audience': announcement.target_audience,
+            'target_audience_display': announcement.get_target_audience_display(),
+            'target_course': announcement.target_course or '',
+            'target_year': announcement.target_year,
+            'target_section': announcement.target_section or '',
+            'created_at': announcement.created_at.isoformat(),
+            'posted_by_name': announcement.posted_by.get_full_name()
         }
         
         return JsonResponse(announcement_data)
@@ -76,38 +79,69 @@ def search_content(request):
             return JsonResponse({
                 'subjects': [],
                 'announcements': [],
+                'teachers': [],
                 'message': 'Query too short'
             })
         
-        # Mock search results - replace with actual database queries
-        subjects = [
-            {
-                'id': 1,
-                'name': 'Data Structures',
-                'code': 'CS301'
-            },
-            {
-                'id': 2,
-                'name': 'Database Systems',
-                'code': 'CS401'
-            }
-        ]
+        # Search subjects
+        subjects = Subject.objects.filter(
+            Q(name__icontains=query) | Q(code__icontains=query),
+            is_active=True
+        )[:10]
         
-        announcements = [
-            {
-                'id': 1,
-                'title': 'Exam Schedule Updated',
-                'content_preview': 'Please check the updated exam schedule...'
-            }
-        ]
+        subject_results = [{
+            'id': subject.id,
+            'name': subject.name,
+            'code': subject.code,
+            'course': subject.course.name,
+            'year': subject.year,
+            'credits': subject.credits
+        } for subject in subjects]
         
-        # Filter based on query
-        filtered_subjects = [s for s in subjects if query.lower() in s['name'].lower() or query.lower() in s['code'].lower()]
-        filtered_announcements = [a for a in announcements if query.lower() in a['title'].lower()]
+        # Search announcements (visible to current user)
+        announcements_query = Q(title__icontains=query) | Q(content__icontains=query)
+        if hasattr(request.user, 'studentprofile'):
+            student = request.user.studentprofile
+            announcements_query &= (
+                Q(target_audience='all') |
+                Q(target_audience='course', target_course=student.course) |
+                Q(target_audience='year', target_year=student.year) |
+                Q(target_audience='section', target_course=student.course,
+                  target_year=student.year, target_section=student.section)
+            )
+        
+        announcements = Announcement.objects.filter(
+            announcements_query, is_active=True
+        )[:5]
+        
+        announcement_results = [{
+            'id': ann.id,
+            'title': ann.title,
+            'content_preview': ann.content[:100] + '...' if len(ann.content) > 100 else ann.content,
+            'is_urgent': ann.is_urgent,
+            'created_at': ann.created_at.strftime('%Y-%m-%d %H:%M')
+        } for ann in announcements]
+        
+        # Search teachers
+        teachers = Teacher.objects.filter(
+            Q(name__icontains=query) | Q(employee_id__icontains=query) |
+            Q(department__icontains=query) | Q(specialization__icontains=query),
+            is_active=True
+        )[:5]
+        
+        teacher_results = [{
+            'id': teacher.id,
+            'name': teacher.name,
+            'employee_id': teacher.employee_id,
+            'department': teacher.department,
+            'specialization': teacher.specialization[:50] + '...' if teacher.specialization and len(teacher.specialization) > 50 else teacher.specialization or ''
+        } for teacher in teachers]
         
         return JsonResponse({
-            'subjects': filtered_subjects,
-            'announcements': filtered_announcements
+            'subjects': subject_results,
+            'announcements': announcement_results,
+            'teachers': teacher_results,
+            'total_results': len(subject_results) + len(announcement_results) + len(teacher_results)
         })
     
     except Exception as e:

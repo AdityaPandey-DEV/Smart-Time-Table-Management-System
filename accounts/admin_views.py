@@ -139,7 +139,7 @@ def manage_courses(request):
             except Exception as e:
                 messages.error(request, 'Failed to add subject. Please check the details.')
         
-        return redirect('manage_courses')
+        return redirect('accounts:manage_courses')
     
     courses = Course.objects.filter(is_active=True).order_by('name')
     subjects = Subject.objects.filter(is_active=True).select_related('course').order_by('course__name', 'year', 'semester')
