@@ -205,13 +205,25 @@ CRISPY_ALLOWED_TEMPLATE_PACKS = "bootstrap5"
 CRISPY_TEMPLATE_PACK = "bootstrap5"
 
 # Email Configuration
+# Smart email setup: Check if SMTP is explicitly configured, otherwise use console backend
 EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
-EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
-EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
-EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
-EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
-EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
-DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+# If SMTP backend is configured, set up all SMTP settings
+if EMAIL_BACKEND == 'django.core.mail.backends.smtp.EmailBackend':
+    EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
+    EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+    EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+    EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+    EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+    DEFAULT_FROM_EMAIL = EMAIL_HOST_USER or 'noreply@enhanced-timetable.com'
+    
+    # Validate required SMTP settings
+    if not EMAIL_HOST_USER or not EMAIL_HOST_PASSWORD:
+        print("⚠️  SMTP backend configured but missing EMAIL_HOST_USER or EMAIL_HOST_PASSWORD")
+        print("🔧 Run 'python setup_gmail.py' to configure Gmail SMTP")
+else:
+    # Console backend or other
+    DEFAULT_FROM_EMAIL = 'noreply@enhanced-timetable.local'
 
 # OpenAI Configuration
 OPENAI_API_KEY = config('OPENAI_API_KEY', default='')

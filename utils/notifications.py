@@ -21,6 +21,26 @@ def send_otp_notification(identifier, otp_code, purpose='registration', method='
     """
     success = False
     
+    # For development: always show OTP in console and return success
+    if settings.DEBUG:
+        logger.info(f"OTP for {identifier}: {otp_code} (Purpose: {purpose}, Method: {method})")
+        print(f"\n=== OTP NOTIFICATION ===")
+        print(f"Method: {method.upper()}")
+        print(f"To: {identifier}")
+        print(f"OTP Code: {otp_code}")
+        print(f"Purpose: {purpose}")
+        print(f"======================\n")
+        
+        # Also try to send email, but don't fail if it doesn't work
+        try:
+            if method == 'email':
+                send_otp_email(identifier, otp_code, purpose)
+        except Exception as e:
+            logger.warning(f"Email sending failed in development mode: {e}")
+        
+        return True  # Always return success in development
+    
+    # Production mode: actually try to send
     if method == 'email':
         # Use Email OTP (completely free)
         success = send_otp_email(identifier, otp_code, purpose)
@@ -30,17 +50,6 @@ def send_otp_notification(identifier, otp_code, purpose='registration', method='
             success = send_otp_sms(identifier, otp_code, purpose)
         else:
             logger.warning("SMS requested but Twilio not configured")
-    
-    # For development: always show OTP in console
-    if settings.DEBUG:
-        logger.info(f"OTP for {identifier}: {otp_code} (Purpose: {purpose}, Method: {method})")
-        print(f"\n=== OTP NOTIFICATION ===")
-        print(f"Method: {method.upper()}")
-        print(f"To: {identifier}")
-        print(f"OTP Code: {otp_code}")
-        print(f"Purpose: {purpose}")
-        print(f"======================\n")
-        return True
     
     return success
 

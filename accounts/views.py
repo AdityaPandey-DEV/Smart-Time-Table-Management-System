@@ -60,7 +60,7 @@ def handle_student_registration_step1(request):
         # Validation
         errors = []
         
-        if not all([first_name, last_name, roll_number, course, year, section, email, phone_number, password]):
+        if not all([first_name, last_name, roll_number, course, year, section, email, password]):
             errors.append('All required fields must be filled.')
         
         if year not in [1, 2, 3, 4]:
@@ -75,7 +75,7 @@ def handle_student_registration_step1(request):
         if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
             errors.append('Invalid email format.')
         
-        if not re.match(r'^\+?[\d\s\-\(\)]{10,15}$', phone_number):
+        if phone_number and not re.match(r'^\+?[\d\s\-\(\)]{10,15}$', phone_number):
             errors.append('Invalid phone number format.')
         
         if len(password) < 6:
@@ -202,7 +202,7 @@ def admin_register(request):
     return render(request, 'accounts/admin_register.html')
 
 def handle_admin_registration_step1(request):
-    """Handle step 1 of admin registration."""
+    """Handle step 1 of admin registration - collect info and send Email OTP (FREE)."""
     try:
         # Get form data
         first_name = request.POST.get('first_name', '').strip()
@@ -210,20 +210,24 @@ def handle_admin_registration_step1(request):
         admin_id = request.POST.get('admin_id', '').strip().upper()
         department = request.POST.get('department', '').strip()
         designation = request.POST.get('designation', '').strip()
-        phone_number = request.POST.get('phone_number', '').strip()
+        email = request.POST.get('email', '').strip().lower()
+        phone_number = request.POST.get('phone_number', '').strip()  # Optional now
         password = request.POST.get('password', '')
         confirm_password = request.POST.get('confirm_password', '')
         
         # Validation
         errors = []
         
-        if not all([first_name, last_name, admin_id, department, phone_number, password]):
+        if not all([first_name, last_name, admin_id, department, email, password]):
             errors.append('All required fields must be filled.')
         
         if not re.match(r'^[A-Z0-9]+$', admin_id):
             errors.append('Admin ID should contain only uppercase letters and numbers.')
         
-        if not re.match(r'^\+?[\d\s\-\(\)]{10,15}$', phone_number):
+        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+            errors.append('Invalid email format.')
+        
+        if phone_number and not re.match(r'^\+?[\d\s\-\(\)]{10,15}$', phone_number):
             errors.append('Invalid phone number format.')
         
         if len(password) < 6:
@@ -236,7 +240,10 @@ def handle_admin_registration_step1(request):
         if AdminProfile.objects.filter(admin_id=admin_id).exists():
             errors.append('Admin ID already exists.')
         
-        if User.objects.filter(phone_number=phone_number).exists():
+        if User.objects.filter(email=email).exists():
+            errors.append('Email already registered.')
+        
+        if phone_number and User.objects.filter(phone_number=phone_number).exists():
             errors.append('Phone number already registered.')
         
         if User.objects.filter(username=admin_id).exists():
@@ -247,10 +254,10 @@ def handle_admin_registration_step1(request):
                 messages.error(request, error)
             return render(request, 'accounts/admin_register.html')
         
-        # Generate and send OTP
-        otp_code = OTP.generate_otp(phone_number, 'registration')
+        # Generate and send Email OTP (FREE!)
+        otp_code = EmailOTP.generate_otp(email, 'registration')
         
-        if send_otp_notification(phone_number, otp_code, 'registration'):
+        if send_otp_notification(email, otp_code, 'registration', method='email'):
             # Store registration data in session
             request.session['reg_data'] = {
                 'first_name': first_name,
@@ -258,18 +265,19 @@ def handle_admin_registration_step1(request):
                 'admin_id': admin_id,
                 'department': department,
                 'designation': designation,
-                'phone_number': phone_number,
+                'email': email,
+                'phone_number': phone_number or '',  # Optional
                 'password': password,
                 'user_type': 'admin'
             }
             
-            messages.info(request, f'OTP sent to {phone_number}. Please enter the 6-digit code to complete registration.')
+            messages.success(request, f'📧 OTP sent to {email}. Please check your email and enter the 6-digit code to complete registration.')
             return render(request, 'accounts/admin_register.html', {
                 'step': 2,
-                'phone_number': phone_number
+                'email': email
             })
         else:
-            messages.error(request, 'Failed to send OTP. Please try again.')
+            messages.error(request, 'Failed to send OTP email. Please check your email address and try again.')
             return render(request, 'accounts/admin_register.html')
             
     except Exception as e:
@@ -277,7 +285,7 @@ def handle_admin_registration_step1(request):
         return render(request, 'accounts/admin_register.html')
 
 def handle_admin_registration_step2(request):
-    """Handle step 2 of admin registration."""
+    """Handle step 2 of admin registration - verify Email OTP and create account."""
     if 'reg_data' not in request.session or request.session['reg_data'].get('user_type') != 'admin':
         messages.error(request, 'Registration session expired. Please start again.')
         return redirect('accounts:admin_register')
@@ -290,18 +298,19 @@ def handle_admin_registration_step2(request):
             messages.error(request, 'Please enter the OTP code.')
             return render(request, 'accounts/admin_register.html', {
                 'step': 2,
-                'phone_number': reg_data['phone_number']
+                'email': reg_data['email']
             })
         
-        # Verify OTP
-        if OTP.verify_otp(reg_data['phone_number'], otp_code, 'registration'):
+        # Verify Email OTP
+        if EmailOTP.verify_otp(reg_data['email'], otp_code, 'registration'):
             # Create user and profile
             with transaction.atomic():
                 user = User.objects.create_user(
                     username=reg_data['admin_id'],
+                    email=reg_data['email'],
                     first_name=reg_data['first_name'],
                     last_name=reg_data['last_name'],
-                    phone_number=reg_data['phone_number'],
+                    phone_number=reg_data.get('phone_number') or '',
                     user_type='admin'
                 )
                 user.set_password(reg_data['password'])
@@ -317,20 +326,20 @@ def handle_admin_registration_step2(request):
             # Clear session data
             del request.session['reg_data']
             
-            messages.success(request, 'Admin registration successful! Your account has been verified. You can now log in.')
+            messages.success(request, '✅ Admin registration successful! Your email has been verified. You can now log in.')
             return redirect('accounts:login')
         else:
             messages.error(request, 'Invalid or expired OTP. Please try again.')
             return render(request, 'accounts/admin_register.html', {
                 'step': 2,
-                'phone_number': reg_data['phone_number']
+                'email': reg_data['email']
             })
             
     except Exception as e:
         messages.error(request, 'An error occurred during verification. Please try again.')
         return render(request, 'accounts/admin_register.html', {
             'step': 2,
-            'phone_number': request.session.get('reg_data', {}).get('phone_number', '')
+            'email': request.session.get('reg_data', {}).get('email', '')
         })
 
 def teacher_register(request):
@@ -401,10 +410,10 @@ def handle_teacher_registration_step1(request):
                 messages.error(request, error)
             return render(request, 'accounts/teacher_register.html')
         
-        # Generate and send OTP
-        otp_code = OTP.generate_otp(phone_number, 'registration')
+        # Generate and send Email OTP (FREE!)
+        otp_code = EmailOTP.generate_otp(email, 'registration')
         
-        if send_otp_notification(phone_number, otp_code, 'registration'):
+        if send_otp_notification(email, otp_code, 'registration', method='email'):
             # Store registration data in session
             request.session['reg_data'] = {
                 'first_name': first_name,
@@ -420,13 +429,13 @@ def handle_teacher_registration_step1(request):
                 'user_type': 'teacher'
             }
             
-            messages.info(request, f'OTP sent to {phone_number}. Please enter the 6-digit code to complete registration.')
+            messages.success(request, f'📧 OTP sent to {email}. Please check your email and enter the 6-digit code to complete registration.')
             return render(request, 'accounts/teacher_register.html', {
                 'step': 2,
-                'phone_number': phone_number
+                'email': email
             })
         else:
-            messages.error(request, 'Failed to send OTP. Please try again.')
+            messages.error(request, 'Failed to send OTP email. Please check your email address and try again.')
             return render(request, 'accounts/teacher_register.html')
             
     except Exception as e:
@@ -450,8 +459,8 @@ def handle_teacher_registration_step2(request):
                 'phone_number': reg_data['phone_number']
             })
         
-        # Verify OTP
-        if OTP.verify_otp(reg_data['phone_number'], otp_code, 'registration'):
+        # Verify Email OTP
+        if EmailOTP.verify_otp(reg_data['email'], otp_code, 'registration'):
             # Create user and profile
             with transaction.atomic():
                 user = User.objects.create_user(
@@ -476,20 +485,20 @@ def handle_teacher_registration_step2(request):
             # Clear session data
             del request.session['reg_data']
             
-            messages.success(request, 'Teacher registration successful! Your account has been verified. You can now log in.')
+            messages.success(request, '✅ Teacher registration successful! Your email has been verified. You can now log in.')
             return redirect('accounts:login')
         else:
             messages.error(request, 'Invalid or expired OTP. Please try again.')
             return render(request, 'accounts/teacher_register.html', {
                 'step': 2,
-                'phone_number': reg_data['phone_number']
+                'email': reg_data['email']
             })
             
     except Exception as e:
         messages.error(request, 'An error occurred during verification. Please try again.')
         return render(request, 'accounts/teacher_register.html', {
             'step': 2,
-            'phone_number': request.session.get('reg_data', {}).get('phone_number', '')
+            'email': request.session.get('reg_data', {}).get('email', '')
         })
 
 def user_login(request):
